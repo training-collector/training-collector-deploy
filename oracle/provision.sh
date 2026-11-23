@@ -5,10 +5,10 @@
 # whatever already exists is reused.
 #
 # Before the first run:  oci session authenticate --profile-name training-collector --region <home region>
-# Run:  ALERT_EMAIL=you@example.com oracle/provision.sh
+# Run:  ALERT_EMAIL=you@example.com oracle/provision.sh   (without ALERT_EMAIL the budget alert is skipped)
 set -eu
 
-: "${ALERT_EMAIL:?Set ALERT_EMAIL: the budget alert goes there}"
+ALERT_EMAIL=${ALERT_EMAIL:-}
 OCPUS=${OCPUS:-2}            # Always Free: up to 4 OCPUs on A1 in total
 MEMORY_GB=${MEMORY_GB:-12}   # Always Free: up to 24 GB on A1 in total
 BOOT_GB=${BOOT_GB:-50}       # Always Free: up to 200 GB of block storage in total
@@ -110,15 +110,19 @@ echo "$ip" > "$state/ip"
 echo "Instance $instance at $ip"
 
 say "Budget alert at the first cent"
-budget=$(q budgets budget list --compartment-id "$tenancy" --query "data[?\"display-name\"=='$NAME'].id | [0]" 2>/dev/null || true)
+if [ -z "$ALERT_EMAIL" ]; then
+    echo "ALERT_EMAIL is not set: no budget alert. Run again with ALERT_EMAIL to add it."
+else
+budget=$(q budgets budget budget list --compartment-id "$tenancy" --query "data[?\"display-name\"=='$NAME'].id | [0]" 2>/dev/null || true)
 if [ -z "$budget" ] || [ "$budget" = "None" ]; then
-    budget=$(q budgets budget create --compartment-id "$tenancy" --display-name "$NAME" --amount 1 \
+    budget=$(q budgets budget budget create --compartment-id "$tenancy" --display-name "$NAME" --amount 1 \
         --reset-period MONTHLY --target-type COMPARTMENT --targets "[\"$tenancy\"]" --query 'data.id')
-    oci budgets alert-rule create --budget-id "$budget" --type ACTUAL --threshold 1 --threshold-type PERCENTAGE \
+    oci budgets budget alert-rule create --budget-id "$budget" --type ACTUAL --threshold 1 --threshold-type PERCENTAGE \
         --recipients "$ALERT_EMAIL" --display-name "$NAME" \
         --message "Training Collector: Oracle Cloud has started charging. Check the resources." > /dev/null
 fi
 echo "$budget"
+fi
 
 say "Done"
 echo "Server: ubuntu@$ip (first boot installs Docker; give it 5 minutes)"
