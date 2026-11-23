@@ -24,8 +24,9 @@ say() { printf '\n== %s\n' "$*"; }
 q() { oci "$@" --raw-output; }
 
 [ -f "$SSH_PUBLIC_KEY" ] || { echo "No SSH public key at $SSH_PUBLIC_KEY; set SSH_PUBLIC_KEY" >&2; exit 1; }
-[ "$OCPUS" -le 4 ] && [ "$MEMORY_GB" -le 24 ] && [ "$BOOT_GB" -ge 47 ] && [ "$BOOT_GB" -le 200 ] || {
-    echo "Requested size is outside the Always Free limits" >&2; exit 1; }
+if [ "$OCPUS" -gt 4 ] || [ "$MEMORY_GB" -gt 24 ] || [ "$BOOT_GB" -lt 47 ] || [ "$BOOT_GB" -gt 200 ]; then
+    echo "Requested size is outside the Always Free limits" >&2; exit 1
+fi
 
 tenancy=$(awk -v p="[$OCI_CLI_PROFILE]" '$0 == p { s = 1; next } /^\[/ { s = 0 } s && /^tenancy *=/ { sub(/^tenancy *= */, ""); print }' "$HOME/.oci/config")
 [ -n "$tenancy" ] || { echo "No tenancy in profile $OCI_CLI_PROFILE of ~/.oci/config" >&2; exit 1; }
@@ -40,8 +41,9 @@ for id in $(q search resource structured-search --query-text "query instance res
     used_memory=$((used_memory + $(q compute instance get --instance-id "$id" --query 'data."shape-config"."memory-in-gbs"' | cut -d. -f1)))
 done
 echo "Other A1 instances use $used_ocpus OCPU and $used_memory GB"
-[ $((used_ocpus + OCPUS)) -le 4 ] && [ $((used_memory + MEMORY_GB)) -le 24 ] || {
-    echo "This instance would exceed the Always Free A1 limits" >&2; exit 1; }
+if [ $((used_ocpus + OCPUS)) -gt 4 ] || [ $((used_memory + MEMORY_GB)) -gt 24 ]; then
+    echo "This instance would exceed the Always Free A1 limits" >&2; exit 1
+fi
 
 say "Compartment"
 compartment=$(q iam compartment list --compartment-id "$tenancy" --name "$NAME" --lifecycle-state ACTIVE --query 'data[0].id' 2>/dev/null || true)
