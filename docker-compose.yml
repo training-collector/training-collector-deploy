@@ -92,7 +92,6 @@ services:
     <<: *service
     # nginx:stable-alpine, pinned by digest (multi-arch: amd64 and arm64)
     image: nginx@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
-    depends_on: [backend, frontend, admin-frontend]
     ports:
       - "80:80"
       - "443:443"

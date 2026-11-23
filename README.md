@@ -21,7 +21,7 @@ bot, auth-bot ──long polling──▶ Telegram;  ──http://backend:8080/i
 
 Push в этот репозиторий применяет конфигурацию: сервер обновляет свою копию репозитория и перезапускает изменившиеся сервисы.
 
-Для выкатки нужны три секрета организации GitHub, общие для всех репозиториев: `DEPLOY_HOST` (IP сервера), `DEPLOY_SSH_KEY` (закрытый ключ из `oracle/.state/deploy_key`) и `DEPLOY_KNOWN_HOSTS` (вывод `ssh-keyscan <IP>`). Пока `DEPLOY_HOST` не задан, workflow собирает образ и пропускает выкатку.
+Для выкатки в каждом репозитории (пяти сервисов и этом) нужны три секрета Actions: `DEPLOY_HOST` (IP сервера), `DEPLOY_SSH_KEY` (закрытый ключ из `oracle/.state/deploy_key`) и `DEPLOY_KNOWN_HOSTS` (вывод `ssh-keyscan <IP>`). Пока `DEPLOY_HOST` не задан, workflow собирает образ и пропускает выкатку.
 
 Откат: в Actions откройте прогон нужного старого коммита и нажмите **Re-run all jobs**. Его образ снова станет `latest` и будет выкачен.
 
