@@ -2,7 +2,7 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name ${SITE_DOMAIN} ${ADMIN_DOMAIN};
+    server_name ${SITE_DOMAIN} www.${SITE_DOMAIN} ${ADMIN_DOMAIN};
     server_tokens off;
 
     location /.well-known/acme-challenge/ {

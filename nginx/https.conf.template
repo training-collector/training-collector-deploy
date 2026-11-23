@@ -35,6 +35,17 @@ server {
     location / { proxy_pass http://frontend:8080; }
 }
 
+# www is an alias of the cabinet.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name www.${SITE_DOMAIN};
+    ssl_certificate /certs/site/fullchain.pem;
+    ssl_certificate_key /certs/site/privkey.pem;
+    return 301 https://${SITE_DOMAIN}$request_uri;
+}
+
 # The administration panel on its own domain.
 server {
     listen 443 ssl;

@@ -15,9 +15,9 @@ publish() {
 
 issue() {
     name=$1
-    domain=$2
+    domains=$2
     # --keep-until-expiring makes a repeated run renew only when the certificate is close to expiry.
-    certbot certonly --webroot -w /var/www/certbot --cert-name "$name" -d "$domain" \
+    certbot certonly --webroot -w /var/www/certbot --cert-name "$name" -d "$domains" \
         --email "$ACME_EMAIL" --agree-tos --no-eff-email --non-interactive --keep-until-expiring \
         ${CERTBOT_STAGING:+--staging} && publish "$name"
 }
@@ -28,7 +28,8 @@ until python3 -c "import socket; socket.create_connection(('proxy', 80), 2)" 2>/
 # 15 minutes: that stays under the Let's Encrypt limit of 5 failed validations per name per hour.
 while true; do
     pause=43200
-    issue site "$SITE_DOMAIN" || { echo "Certificate for $SITE_DOMAIN failed, retrying in 15 minutes"; pause=900; }
+    # The cabinet's certificate also covers www, which redirects to the bare domain.
+    issue site "$SITE_DOMAIN,www.$SITE_DOMAIN" || { echo "Certificate for $SITE_DOMAIN failed, retrying in 15 minutes"; pause=900; }
     issue admin "$ADMIN_DOMAIN" || { echo "Certificate for $ADMIN_DOMAIN failed, retrying in 15 minutes"; pause=900; }
     sleep "$pause"
 done
