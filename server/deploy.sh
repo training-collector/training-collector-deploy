@@ -17,8 +17,8 @@ set -- ${SSH_ORIGINAL_COMMAND:-${1:-}}
 target=${1:-}
 services="backend bot auth-bot frontend admin-frontend"
 
-case " $services " in
-    *" $target "*)
+case "$target" in
+    backend|bot|auth-bot|frontend|admin-frontend)
         read -r user || true
         read -r token || true
         if [ -z "${user:-}" ] || [ -z "${token:-}" ]; then echo "Send the registry user and token on stdin" >&2; exit 2; fi
