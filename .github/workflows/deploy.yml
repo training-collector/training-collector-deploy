@@ -1,0 +1,38 @@
+# Checks the configuration and applies it on the server: compose file, nginx and scripts.
+name: Deploy configuration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate the compose file
+        run: cp .env.example .env && sed -i 's/^\([A-Z_]*\)=$/\1=placeholder/' .env && docker compose config -q
+      - name: Check the shell scripts
+        run: shellcheck server/*.sh nginx/*.sh certbot/*.sh oracle/*.sh
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Apply on the server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$HOST" ]; then echo "DEPLOY_HOST is not set; skipping the rollout"; exit 0; fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes deploy@"$HOST" config

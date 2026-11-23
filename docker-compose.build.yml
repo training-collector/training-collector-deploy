@@ -1,0 +1,7 @@
+# Builds the images from local checkouts placed next to this repository.
+services:
+  backend: { build: ../training-collector-backend }
+  auth-bot: { build: ../training-collector-auth-bot }
+  bot: { build: ../training-collector-bot }
+  frontend: { build: ../training-collector-frontend }
+  admin-frontend: { build: ../training-collector-admin-frontend }

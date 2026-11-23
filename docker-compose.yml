@@ -1,0 +1,157 @@
+# The whole service on one server. The images are built by GitHub Actions in each repository
+# and published to GitHub Container Registry; the server only pulls them:
+#   docker compose pull && docker compose up -d
+# To build from local checkouts instead (repositories next to this one):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+name: training-collector
+
+x-service: &service
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  db:
+    <<: *service
+    # postgres:16-alpine, pinned by digest (multi-arch: amd64 and arm64)
+    image: postgres@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    environment:
+      POSTGRES_DB: training
+      POSTGRES_USER: training_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U training_app -d training"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    <<: *service
+    image: ghcr.io/training-collector/training-collector-backend:${IMAGE_TAG:-latest}
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DB_JDBC_URL: jdbc:postgresql://db:5432/training
+      DB_USER: training_app
+      DB_PASSWORD: ${DB_PASSWORD}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:?Set ADMIN_LOGIN in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      AUTH_SERVICE_KEY: ${AUTH_SERVICE_KEY:?Set AUTH_SERVICE_KEY in .env}
+      TRAINING_SERVICE_KEY: ${TRAINING_SERVICE_KEY:?Set TRAINING_SERVICE_KEY in .env}
+      APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env}
+      # The proxy puts the visitor's address here; the backend is reachable only through the proxy and the bots.
+      CLIENT_IP_HEADER: X-Real-IP
+    mem_limit: 768m
+
+  auth-bot:
+    <<: *service
+    image: ghcr.io/training-collector/training-collector-auth-bot:${IMAGE_TAG:-latest}
+    depends_on: [backend]
+    environment:
+      PLATFORM_URL: http://backend:8080
+      PLATFORM_ALLOW_INSECURE: "true"
+      AUTH_BOT_TOKEN: ${AUTH_BOT_TOKEN:?Set AUTH_BOT_TOKEN in .env}
+      AUTH_SERVICE_KEY: ${AUTH_SERVICE_KEY}
+    mem_limit: 384m
+
+  bot:
+    <<: *service
+    image: ghcr.io/training-collector/training-collector-bot:${IMAGE_TAG:-latest}
+    depends_on: [backend]
+    environment:
+      PLATFORM_URL: http://backend:8080
+      PLATFORM_ALLOW_INSECURE: "true"
+      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
+      TRAINING_SERVICE_KEY: ${TRAINING_SERVICE_KEY}
+      BOT_DEFAULT_TIME_ZONE: ${BOT_DEFAULT_TIME_ZONE:-UTC}
+    mem_limit: 384m
+
+  frontend:
+    <<: *service
+    image: ghcr.io/training-collector/training-collector-frontend:${IMAGE_TAG:-latest}
+    depends_on: [backend]
+    environment:
+      BACKEND_URL: http://backend:8080
+      FRONTEND_PORT: "8080"
+    mem_limit: 64m
+
+  admin-frontend:
+    <<: *service
+    image: ghcr.io/training-collector/training-collector-admin-frontend:${IMAGE_TAG:-latest}
+    depends_on: [backend]
+    environment:
+      BACKEND_URL: http://backend:8080
+      FRONTEND_PORT: "8080"
+    mem_limit: 64m
+
+  # HTTPS in front of everything. The only service with public ports.
+  proxy:
+    <<: *service
+    # nginx:stable-alpine, pinned by digest (multi-arch: amd64 and arm64)
+    image: nginx@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
+    depends_on: [backend, frontend, admin-frontend]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?Set SITE_DOMAIN in .env}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+    volumes:
+      - ./nginx/http.conf.template:/etc/nginx/proxy/http.conf.template:ro
+      - ./nginx/https.conf.template:/etc/nginx/proxy/https.conf.template:ro
+      - ./nginx/40-proxy-config.sh:/docker-entrypoint.d/40-proxy-config.sh:ro
+      - certs:/certs:ro
+      - certbot-webroot:/var/www/certbot:ro
+    mem_limit: 64m
+
+  # Let's Encrypt certificates for both domains, renewed automatically.
+  certbot:
+    <<: *service
+    # certbot/certbot:v4.1.1, pinned by digest (multi-arch: amd64 and arm64)
+    image: certbot/certbot@sha256:263fe7ee9dde6440bf8baa957c0a8eb0118fc05ef86cf743c4cc84ca84303a21
+    depends_on: [proxy]
+    entrypoint: ["sh", "/certbot.sh"]
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      # Any value: use the Let's Encrypt test server (untrusted certificates, no rate limits).
+      CERTBOT_STAGING: ${CERTBOT_STAGING:-}
+    volumes:
+      - ./certbot/certbot.sh:/certbot.sh:ro
+      - letsencrypt:/etc/letsencrypt
+      - certs:/certs
+      - certbot-webroot:/var/www/certbot
+    mem_limit: 128m
+
+  # A database dump every day; dumps older than BACKUP_KEEP_DAYS are removed.
+  backup:
+    <<: *service
+    image: postgres@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          file=/backups/training-$$(date +%F).dump
+          pg_dump -h db -U training_app -d training -Fc -f "$$file.tmp" && mv "$$file.tmp" "$$file" && echo "Backup $$file written"
+          find /backups -name 'training-*.dump' -mtime +$$KEEP_DAYS -delete
+          sleep 86400
+        done
+    mem_limit: 128m
+
+volumes:
+  db-data:
+  letsencrypt:
+  certs:
+  certbot-webroot:

@@ -1,0 +1,52 @@
+# Port 443. Used once certbot has issued the certificates.
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 1d;
+server_tokens off;
+
+# The backend answers JSON; the sites' own nginx already compresses static files.
+gzip on;
+gzip_proxied any;
+gzip_min_length 1024;
+gzip_types application/json;
+
+# The visitor's address replaces whatever the request carried, so it cannot be forged.
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto https;
+# The sites set this header too; the proxy sends its own once.
+proxy_hide_header Strict-Transport-Security;
+
+# The trainer's cabinet. Only the public API goes to the backend:
+# /internal/v1/* stays inside the Docker network, for the bots only.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${SITE_DOMAIN};
+    ssl_certificate /certs/site/fullchain.pem;
+    ssl_certificate_key /certs/site/privkey.pem;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 2m;
+
+    location /api/v1/ { proxy_pass http://backend:8080; }
+    location = /health { proxy_pass http://backend:8080; }
+    location / { proxy_pass http://frontend:8080; }
+}
+
+# The administration panel on its own domain.
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${ADMIN_DOMAIN};
+    ssl_certificate /certs/admin/fullchain.pem;
+    ssl_certificate_key /certs/admin/privkey.pem;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 2m;
+
+    location /admin/v1/ { proxy_pass http://backend:8080; }
+    location = /health { proxy_pass http://backend:8080; }
+    location / { proxy_pass http://admin-frontend:8080; }
+}

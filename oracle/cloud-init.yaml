@@ -1,0 +1,32 @@
+#cloud-config
+# First boot of the server. __DEPLOY_PUBLIC_KEY__ is filled in by provision.sh.
+package_update: true
+package_upgrade: true
+packages: [ca-certificates, curl, git, unattended-upgrades]
+
+write_files:
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+runcmd:
+  # Docker from its own repository: the Ubuntu package lags behind and lacks the compose plugin.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - sh -c 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable --now docker
+  # Oracle's Ubuntu images reject everything but SSH in the host firewall; open HTTP and HTTPS.
+  - iptables -I INPUT 5 -p tcp --dport 80 -m state --state NEW -j ACCEPT
+  - iptables -I INPUT 5 -p tcp --dport 443 -m state --state NEW -j ACCEPT
+  - netfilter-persistent save
+  # The user GitHub Actions connects as. Its key may only run the deploy script.
+  - useradd --create-home --shell /bin/bash --groups docker deploy
+  - install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
+  - sh -c 'echo "command=\"/opt/training-collector/server/deploy.sh\",restrict __DEPLOY_PUBLIC_KEY__" > /home/deploy/.ssh/authorized_keys'
+  - chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys
+  - git clone https://github.com/training-collector/training-collector-deploy.git /opt/training-collector
+  - chown -R deploy:deploy /opt/training-collector
+  - usermod -aG docker ubuntu
